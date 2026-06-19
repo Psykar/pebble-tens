@@ -22,11 +22,31 @@ static void set_defaults(void) {
 
 const TensSettings *tens_settings(void) { return &s_settings; }
 
+static int clampi(int v, int lo, int hi) {
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Clamp numeric fields to sane ranges. Settings arrive from user input (Clay
+// sends parseInt-or-0) and from persisted blobs that may predate a struct
+// change, so an out-of-range birth_month would index DAYS_IN_MONTH[] out of
+// bounds and a garbage birth_year would spin absolute_days() into a watchdog
+// reset (boot loop). Validate here, the single boundary the rest trusts.
+static void sanitize(void) {
+  s_settings.birth_year = clampi(s_settings.birth_year, 1900, 2200);
+  s_settings.birth_month = clampi(s_settings.birth_month, 1, 12);
+  s_settings.birth_day = clampi(s_settings.birth_day, 1, 31);
+  s_settings.life_span_years = clampi(s_settings.life_span_years, 1, 200);
+}
+
 void tens_settings_init(void) {
   set_defaults();
-  if (persist_exists(SETTINGS_PERSIST_KEY)) {
+  // Only trust the persisted blob if it matches the current struct size. After
+  // a struct-layout change the old blob would load garbage into our fields.
+  if (persist_exists(SETTINGS_PERSIST_KEY) &&
+      persist_get_size(SETTINGS_PERSIST_KEY) == (int)sizeof(s_settings)) {
     persist_read_data(SETTINGS_PERSIST_KEY, &s_settings, sizeof(s_settings));
   }
+  sanitize();
 }
 
 // Read a boolean tuple keyed by `key`; pkjs sends 1/0 as an int.
@@ -61,7 +81,7 @@ bool tens_settings_apply(DictionaryIterator *iter) {
       read_int(iter, MESSAGE_KEY_BIRTH_DAY, s_settings.birth_day);
   s_settings.life_span_years =
       read_int(iter, MESSAGE_KEY_LIFE_SPAN_YEARS, s_settings.life_span_years);
-  if (s_settings.life_span_years <= 0) s_settings.life_span_years = 80;
+  sanitize();
 
   persist_write_data(SETTINGS_PERSIST_KEY, &s_settings, sizeof(s_settings));
   return memcmp(&prev, &s_settings, sizeof(s_settings)) != 0;

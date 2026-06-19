@@ -10,23 +10,17 @@ static int clampi(int v, int lo, int hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Fill a rect with solid ink, or with the grid-wide spectral ramp (rainbow):
-// each column samples the ramp at its position across the whole grid.
+// Fill a rect with solid ink.
+// TEMP: the grid-wide spectral ramp (rainbow) path has been removed while we
+// isolate the boot-loop crash; this always fills solid. The `grid`/`rainbow`
+// params are kept so callers and the signature stay stable for an easy revert.
 static void draw_ink_rect(GContext *ctx, GRect r, GRect grid, bool rainbow,
                           GColor ink) {
+  (void)grid;
+  (void)rainbow;
   if (r.size.w <= 0 || r.size.h <= 0) return;
-  if (!rainbow) {
-    graphics_context_set_fill_color(ctx, ink);
-    graphics_fill_rect(ctx, r, 0, GCornerNone);
-    return;
-  }
-  int span = grid.size.w - 1;
-  if (span < 1) span = 1;
-  for (int x = r.origin.x; x < rect_right(r); x++) {
-    int t = (x - grid.origin.x) * 1000 / span;
-    graphics_context_set_stroke_color(ctx, tens_spectral(t));
-    graphics_draw_line(ctx, GPoint(x, r.origin.y), GPoint(x, rect_bottom(r) - 1));
-  }
+  graphics_context_set_fill_color(ctx, ink);
+  graphics_fill_rect(ctx, r, 0, GCornerNone);
 }
 
 // The missing (unfilled) part of a bar/box: muted outline border or muted fill.
@@ -54,21 +48,10 @@ static void fill_solid_bar(GContext *ctx, GRect bar, int progress, GColor color,
   }
 }
 
-// Life bar in rainbow mode: one continuous spectral ramp revealed up to progress.
-static void fill_gradient_bar(GContext *ctx, GRect bar, int progress,
-                              bool missing_fill, GColor muted) {
-  draw_missing(ctx, bar, missing_fill, muted);
-  progress = clampi(progress, 0, 1000);
-  int fill_w = bar.size.w * progress / 1000;
-  int span = bar.size.w - 1;
-  if (span < 1) span = 1;
-  for (int dx = 0; dx < fill_w; dx++) {
-    int t = dx * 1000 / span;
-    graphics_context_set_stroke_color(ctx, tens_spectral(t));
-    int x = bar.origin.x + dx;
-    graphics_draw_line(ctx, GPoint(x, bar.origin.y), GPoint(x, rect_bottom(bar) - 1));
-  }
-}
+// TEMP: the rainbow life-bar gradient (fill_gradient_bar) has been removed
+// while we isolate the boot-loop crash. The life bar now always renders solid
+// via fill_solid_bar(). Restore the per-pixel spectral gradient here once
+// rainbow is reimplemented as a fast precomputed bitmap.
 
 static void render_grid(GContext *ctx, const TensLayout *L,
                         const TensDerived *d, const TensSettings *cfg,
@@ -108,9 +91,11 @@ static void render_grid(GContext *ctx, const TensLayout *L,
 void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
                  const TensSettings *cfg_in) {
   // TEMP: rainbow disabled on-device while we isolate the boot-loop crash.
-  // The per-pixel spectral render is the prime suspect; force it off here
-  // regardless of the saved setting. Remove this override (and use cfg_in
-  // directly) once rainbow is reimplemented as a fast precomputed bitmap.
+  // The per-pixel spectral render (the prime suspect) has been stripped from
+  // draw_ink_rect and the life bar; this override also forces the flag off so
+  // the month/year bars keep their fixed colors regardless of the saved
+  // setting. Remove this override (and use cfg_in directly) once rainbow is
+  // reimplemented as a fast precomputed bitmap.
   TensSettings cfg_local = *cfg_in;
   cfg_local.rainbow = false;
   const TensSettings *cfg = &cfg_local;
@@ -146,10 +131,7 @@ void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
   fill_solid_bar(ctx, tens_year_bar(&L), d.frac_year, year_color,
                  cfg->missing_fill, muted);
 
+  // TEMP: rainbow gradient removed — life bar always renders solid.
   GRect life = tens_life_bar(&L);
-  if (cfg->rainbow) {
-    fill_gradient_bar(ctx, life, d.frac_life, cfg->missing_fill, muted);
-  } else {
-    fill_solid_bar(ctx, life, d.frac_life, ink, cfg->missing_fill, muted);
-  }
+  fill_solid_bar(ctx, life, d.frac_life, ink, cfg->missing_fill, muted);
 }
