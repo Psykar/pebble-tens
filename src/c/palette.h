@@ -18,6 +18,32 @@
 #define TENS_COLOR_BATTERY_LOW      GColorRed
 #define TENS_BATTERY_LOW_PCT        20
 
+// --- Work-day pending shade --------------------------------------------------
+// Snap a 0..255 channel to the nearest 2-bit Pebble level (0/85/170/255).
+static inline int tens_quant85(int c) {
+  int q = (c + 42) / 85;
+  return (q > 3 ? 3 : q) * 85;
+}
+
+// A darker companion for the chosen work color, used for the pending (future)
+// work boxes. Tries ~two then ~three gamut shades darker (integer percents, no
+// floats); returns `fallback` (a greyscale tone) when darkening would collapse
+// to black, so a very dark pick degrades gracefully rather than vanishing.
+static inline GColor tens_work_dark(int base, GColor fallback) {
+  int r = (base >> 16) & 0xFF, g = (base >> 8) & 0xFF, b = base & 0xFF;
+  static const int PCT[2] = {40, 20};
+  for (int i = 0; i < 2; i++) {
+    int dr = tens_quant85(r * PCT[i] / 100);
+    int dg = tens_quant85(g * PCT[i] / 100);
+    int db = tens_quant85(b * PCT[i] / 100);
+    if ((dr || dg || db) && (dr != r || dg != g || db != b)) {
+      return GColorFromRGB(dr, dg, db);
+    }
+  }
+  return fallback;
+}
+
+
 // --- Spectral ramp (life bar + rainbow grid mask) ----------------------------
 #define TENS_SPECTRAL_STOPS 6
 static const uint8_t TENS_SPECTRAL[TENS_SPECTRAL_STOPS][3] = {

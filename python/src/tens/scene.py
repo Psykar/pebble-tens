@@ -207,18 +207,22 @@ def build_scene(
                       ink_color)
         elif i == derived.ten_minute_index:
             # Show the whole current box (its missing part as outline or fill),
-            # then the completed-minute lines on top.
+            # then the completed-minute lines on top. The missing part matches
+            # the surrounding pending boxes (darker work shade in work hours).
+            missing = "work_dark" if in_work else "muted"
             if cfg.missing_style == "fill":
-                scene.add(FillRect(cell.x, cell.y, cell.w, cell.h, "muted"))
+                scene.add(FillRect(cell.x, cell.y, cell.w, cell.h, missing))
             else:
-                scene.add(StrokeRect(cell.x, cell.y, cell.w, cell.h, "muted"))
+                scene.add(StrokeRect(cell.x, cell.y, cell.w, cell.h, missing))
             _fill_lines(
                 scene, cell, derived.minute_of_box,
                 fill_axis, cfg.fill_invert, grid, cfg.rainbow, ink_color,
             )
         else:
-            # Pending work-hour boxes hint the work color; the rest stay muted.
-            _placeholder(scene, cell, placeholder, "work" if in_work else "muted")
+            # Pending work-hour boxes hint a darker shade of the work color; the
+            # rest stay muted.
+            _placeholder(scene, cell, placeholder,
+                         "work_dark" if in_work else "muted")
 
     # Two bars under the grid: a top bar split in half (month | year) and the
     # long life bar. Each fills up to its progress over a "muted" track. In

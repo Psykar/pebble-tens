@@ -42,23 +42,49 @@ static void fill_solid_bar(GContext *ctx, GRect bar, int progress, GColor color,
   }
 }
 
-// Overlay a tiny label centered on a bar. GOTHIC_14_BOLD is the smallest bold
-// system font; we center its line box on the bar so the glyphs sit inside the
-// bar rather than floating above it. Gothic carries extra top padding, so a
-// small upward nudge (LABEL_VOFFSET) keeps the glyph block visually centered.
-// NULL text draws nothing.
+// Draw a label within a given rect. GOTHIC_14_BOLD is the smallest bold system
+// font. The label is vertically centered in the rect; Gothic carries extra top
+// padding, so a small upward nudge (LABEL_VOFFSET) keeps the glyph block
+// visually centered. NULL text draws nothing.
 #define LABEL_VOFFSET (-3)
-static void draw_bar_label(GContext *ctx, GRect bar, const char *text,
-                           GColor color) {
+#define LABEL_GAP 3   // pixels between bar edge and label text
+// Reserved label column width. Wide enough for "100" / 4-digit year in
+// GOTHIC_14_BOLD without clipping, while leaving the bar a usable length.
+#if PBL_DISPLAY_WIDTH >= 200
+#define LABEL_W 24
+#else
+#define LABEL_W 22
+#endif
+
+static void draw_bar_label(GContext *ctx, GRect box, const char *text,
+                           GColor color, GTextAlignment align) {
   if (!text) return;
   GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   graphics_context_set_text_color(ctx, color);
   const int box_h = 14;
-  GRect box = GRect(bar.origin.x,
-                    bar.origin.y + (bar.size.h - box_h) / 2 + LABEL_VOFFSET,
-                    bar.size.w, box_h);
-  graphics_draw_text(ctx, text, font, box, GTextOverflowModeTrailingEllipsis,
-                     GTextAlignmentCenter, NULL);
+  GRect line = GRect(box.origin.x,
+                     box.origin.y + (box.size.h - box_h) / 2 + LABEL_VOFFSET,
+                     box.size.w, box_h);
+  graphics_draw_text(ctx, text, font, line, GTextOverflowModeTrailingEllipsis,
+                     align, NULL);
+}
+
+// Carve a label column off one side of a slot, leaving the bar in the rest.
+// left=true reserves the label on the left (for left bars); left=false reserves
+// it on the right (for right bars). The bar shrinks to make room so neither the
+// bar nor the label spills outside the slot. Outputs the bar and label rects.
+static void split_slot(GRect slot, bool left, GRect *bar, GRect *label) {
+  int bar_w = slot.size.w - LABEL_W - LABEL_GAP;
+  if (bar_w < 1) bar_w = 1;
+  if (left) {
+    *label = GRect(slot.origin.x, slot.origin.y, LABEL_W, slot.size.h);
+    *bar = GRect(slot.origin.x + LABEL_W + LABEL_GAP, slot.origin.y, bar_w,
+                 slot.size.h);
+  } else {
+    *bar = GRect(slot.origin.x, slot.origin.y, bar_w, slot.size.h);
+    *label = GRect(rect_right(slot) - LABEL_W, slot.origin.y, LABEL_W,
+                   slot.size.h);
+  }
 }
 
 // The bars always render solid (each slot is a single metric color). The old
@@ -74,6 +100,9 @@ static void render_grid(GContext *ctx, const TensLayout *L,
   // one distinct color.
   bool work = cfg->work_enabled && cfg->work_end > cfg->work_start;
   GColor work_ink = work ? GColorFromHEX(cfg->work_color) : ink;
+  // Pending work boxes use a shade or two darker than the work color, dropping
+  // to the muted gray when the pick is too dark to darken further.
+  GColor work_dark = work ? tens_work_dark(cfg->work_color, muted) : muted;
   for (int i = 0; i < 144; i++) {
     GRect cell = tens_ten_minute_cell(L, i);
     int cell_min = i * 10;  // minute-of-day at the start of this box
@@ -93,8 +122,10 @@ static void render_grid(GContext *ctx, const TensLayout *L,
     if (i < d->ten_minute_index) {
       draw_ink_rect(ctx, cell, cell_color);
     } else if (i == d->ten_minute_index) {
-      // Current box: muted missing part, then the completed-minute lines.
-      draw_missing(ctx, cell, cfg->grid_missing_fill, muted);
+      // Current box: its missing (pending) part matches the surrounding pending
+      // boxes (work shade in work hours, else muted), then the completed-minute
+      // lines on top.
+      draw_missing(ctx, cell, cfg->grid_missing_fill, in_work ? work_dark : muted);
       // Minute lines fill along the cell's long axis (same as the boxes). A box
       // spans 10 minutes, so the fill is proportional to the cell extent rather
       // than a fixed 1px-per-minute (which only held on emery's 10px boxes).
@@ -112,12 +143,12 @@ static void render_grid(GContext *ctx, const TensLayout *L,
       draw_ink_rect(ctx, fill, cell_color);
     } else {
       // Future box: a centered dot placeholder, sized to the box. Pending
-      // work-hour boxes use the work color so the upcoming work block reads at
-      // a glance; the rest stay muted gray.
+      // work-hour boxes use a darker shade of the work color so the upcoming
+      // work block reads at a glance; the rest stay muted gray.
       int d4 = cell.size.w >= 9 ? 4 : 3;
       int ox = cell.origin.x + (cell.size.w - d4) / 2;
       int oy = cell.origin.y + (cell.size.h - d4) / 2;
-      graphics_context_set_fill_color(ctx, in_work ? work_ink : muted);
+      graphics_context_set_fill_color(ctx, in_work ? work_dark : muted);
       graphics_fill_rect(ctx, GRect(ox, oy, d4, d4), 0, GCornerNone);
     }
   }
@@ -215,8 +246,8 @@ void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
 
   // Four configurable bar slots: top-left, top-right, bottom-left, bottom-right.
   // Each slot shows one user-chosen metric (or OFF, drawn blank). Every slot is
-  // half-width, so both bar rows split into two. Each carries a tiny overlaid
-  // label (weekday / month / year / age / battery percent).
+  // half-width, so both bar rows split into two. Each carries a label positioned
+  // contextually: left bars have labels on the left, right bars on the right.
   BatteryChargeState batt = battery_state_service_peek();
   const int slots[4] = {cfg->slot_tl, cfg->slot_tr, cfg->slot_bl, cfg->slot_br};
   for (int s = 0; s < 4; s++) {
@@ -228,8 +259,16 @@ void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
                      sizeof(buf))) {
       continue;  // OFF: leave the slot blank
     }
-    GRect bar = tens_bar_quad(&L, s);
+    GRect slot = tens_bar_quad(&L, s);
+    // Contextual labels: left bars (slots 0,2) carry the label on the left,
+    // right bars (slots 1,3) on the right. Carve the label column off the
+    // matching side so the bar shrinks rather than overlapping the text.
+    bool left = (s % 2 == 0);
+    GRect bar, label_box;
+    split_slot(slot, left, &bar, &label_box);
     fill_solid_bar(ctx, bar, frac, color, cfg->bars_missing_fill, muted);
-    draw_bar_label(ctx, bar, label, ink);
+    // Align the label toward the bar it belongs to so each pair reads together.
+    draw_bar_label(ctx, label_box, label, ink,
+                   left ? GTextAlignmentRight : GTextAlignmentLeft);
   }
 }

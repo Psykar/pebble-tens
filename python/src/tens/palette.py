@@ -91,6 +91,25 @@ def _from_hex(value: int) -> PaletteColor:
     return PaletteColor((r, g, b), f"GColorFromHEX(0x{value:06X})")
 
 
+def _quant85(c: int) -> int:
+    """Snap a 0..255 channel to the nearest 2-bit Pebble level (0/85/170/255)."""
+    return min(3, (c + 42) // 85) * 85
+
+
+def _darken(value: int) -> int | None:
+    """A darker companion for ``value`` (0xRRGGBB) for the pending work boxes.
+
+    Tries ~two then ~three gamut shades darker; returns ``None`` when darkening
+    would collapse to black, letting the caller drop to a greyscale tone.
+    """
+    r, g, b = (value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF
+    for pct in (40, 20):
+        dr, dg, db = _quant85(r * pct // 100), _quant85(g * pct // 100), _quant85(b * pct // 100)
+        if (dr or dg or db) and (dr, dg, db) != (r, g, b):
+            return (dr << 16) | (dg << 8) | db
+    return None
+
+
 def resolve(name: str = "default", dark_mode: bool = False,
             work_color: int = 0xFFAA00, grid_color: int | None = None) -> Palette:
     """Build the palette for the chosen background.
@@ -102,22 +121,27 @@ def resolve(name: str = "default", dark_mode: bool = False,
     outlines, and the month/year bars in rainbow mode: dark gray on a white
     background, light gray on a black one (so it stays visible in both).
     "month"/"year" are the fixed non-rainbow bar colors. "work" is the
-    user-configurable work-day highlight color (RGB hex ``work_color``). "grid"
-    is the configurable filled-box color (RGB hex ``grid_color``); it defaults
-    to the mode ink when unset.
+    user-configurable work-day highlight color (RGB hex ``work_color``); its
+    pending (future) boxes use "work_dark", a shade or two darker, or the muted
+    gray when the pick is too dark to darken. "grid" is the configurable
+    filled-box color (RGB hex ``grid_color``); it defaults to the mode ink when
+    unset.
     """
     ink = _WHITE if dark_mode else _BLACK
+    muted = _DARK_GRAY if dark_mode else _LIGHT_GRAY
     grid = ink if grid_color is None else _from_hex(grid_color)
+    work_dark = _darken(work_color)
     return Palette(
         name,
         {
             "background": _BLACK if dark_mode else _WHITE,
             "ink": ink,
             "grid": grid,
-            "muted": _DARK_GRAY if dark_mode else _LIGHT_GRAY,
+            "muted": muted,
             "gray": _LIGHT_GRAY if dark_mode else _DARK_GRAY,
             "month": _MONTH,
             "year": _YEAR,
             "work": _from_hex(work_color),
+            "work_dark": muted if work_dark is None else _from_hex(work_dark),
         },
     )
