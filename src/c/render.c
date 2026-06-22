@@ -188,12 +188,12 @@ static bool metric_view(int metric, const TensDerived *d, const struct tm *now,
       return true;
     case TENS_METRIC_MONTH:
       *frac = d->frac_month; *color = TENS_COLOR_MONTH;
-      *label = MON[now->tm_mon % 12];
+      snprintf(buf, buflen, "%d", now->tm_mday);
+      *label = buf;
       return true;
     case TENS_METRIC_YEAR:
       *frac = d->frac_year;  *color = TENS_COLOR_YEAR;
-      snprintf(buf, buflen, "%d", now->tm_year + 1900);
-      *label = buf;
+      *label = MON[now->tm_mon % 12];
       return true;
     case TENS_METRIC_LIFE: {
       int now_year = now->tm_year + 1900;
