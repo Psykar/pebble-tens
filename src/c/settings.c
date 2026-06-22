@@ -1,10 +1,10 @@
 #include "settings.h"
 #include <string.h>
 
-// Bumped to 2 when missing_fill split into bars_/grid_missing_fill: the struct
-// stays the same size, so the size guard alone can't tell old blobs apart —
-// the new key forces a clean default load after the update.
-#define SETTINGS_PERSIST_KEY 2
+// Bumped to 4 when the work-day highlight fields were added. The size guard
+// alone can't always distinguish old blobs, so the new key forces a clean
+// default load after the update.
+#define SETTINGS_PERSIST_KEY 4
 
 static TensSettings s_settings;
 
@@ -17,11 +17,18 @@ static void set_defaults(void) {
       .fill_invert = false,
       .bars_missing_fill = true,   // bars: filled track by default
       .grid_missing_fill = false,  // current block: outline by default
-      .bar_set = TENS_BARS_MONTH_YEAR_LIFE,
+      .work_enabled = false,       // work-day highlight off by default
+      .slot_tl = TENS_METRIC_MONTH,
+      .slot_tr = TENS_METRIC_YEAR,
+      .slot_bl = TENS_METRIC_LIFE,
+      .slot_br = TENS_METRIC_BATTERY,
       .birth_year = 1990,
       .birth_month = 4,
       .birth_day = 12,
       .life_span_years = 80,
+      .work_start = 9 * 60,        // 9-to-5 when enabled
+      .work_end = 17 * 60,
+      .work_color = TENS_WORK_COLOR_DEFAULT,  // warm amber (GColorChromeYellow)
   };
 }
 
@@ -41,8 +48,13 @@ static void sanitize(void) {
   s_settings.birth_month = clampi(s_settings.birth_month, 1, 12);
   s_settings.birth_day = clampi(s_settings.birth_day, 1, 31);
   s_settings.life_span_years = clampi(s_settings.life_span_years, 1, 200);
-  s_settings.bar_set = clampi(s_settings.bar_set, TENS_BARS_MONTH_YEAR_LIFE,
-                              TENS_BARS_WEEK_MONTH_YEAR);
+  s_settings.slot_tl = clampi(s_settings.slot_tl, TENS_METRIC_MIN, TENS_METRIC_MAX);
+  s_settings.slot_tr = clampi(s_settings.slot_tr, TENS_METRIC_MIN, TENS_METRIC_MAX);
+  s_settings.slot_bl = clampi(s_settings.slot_bl, TENS_METRIC_MIN, TENS_METRIC_MAX);
+  s_settings.slot_br = clampi(s_settings.slot_br, TENS_METRIC_MIN, TENS_METRIC_MAX);
+  s_settings.work_start = clampi(s_settings.work_start, 0, 1439);
+  s_settings.work_end = clampi(s_settings.work_end, 0, 1440);
+  s_settings.work_color = clampi(s_settings.work_color, 0, 0xFFFFFF);
 }
 
 void tens_settings_init(void) {
@@ -98,6 +110,27 @@ static int read_int(DictionaryIterator *iter, uint32_t key, int current) {
   return t ? (int)tuple_to_int(t) : current;
 }
 
+// Parse a clock time into minutes after midnight. Accepts "H", "HH", "H:MM" or
+// "HH:MM"; missing parts default to zero. The config page sends these as text.
+static int parse_hhmm(const char *s) {
+  int h = 0, m = 0;
+  while (*s >= '0' && *s <= '9') { h = h * 10 + (*s - '0'); s++; }
+  if (*s == ':') {
+    s++;
+    while (*s >= '0' && *s <= '9') { m = m * 10 + (*s - '0'); s++; }
+  }
+  return h * 60 + m;
+}
+
+// Read a work-time bound. Text tuples are "HH:MM"; an integer tuple is already
+// minutes after midnight (e.g. a persisted value echoed back).
+static int read_time(DictionaryIterator *iter, uint32_t key, int current) {
+  Tuple *t = dict_find(iter, key);
+  if (!t) return current;
+  if (t->type == TUPLE_CSTRING) return parse_hhmm(t->value->cstring);
+  return (int)tuple_to_int(t);
+}
+
 bool tens_settings_apply(DictionaryIterator *iter) {
   TensSettings prev = s_settings;
   s_settings.rainbow = read_bool(iter, MESSAGE_KEY_RAINBOW, s_settings.rainbow);
@@ -113,7 +146,12 @@ bool tens_settings_apply(DictionaryIterator *iter) {
       read_bool(iter, MESSAGE_KEY_BARS_MISSING_STYLE, s_settings.bars_missing_fill);
   s_settings.grid_missing_fill =
       read_bool(iter, MESSAGE_KEY_GRID_MISSING_STYLE, s_settings.grid_missing_fill);
-  s_settings.bar_set = read_int(iter, MESSAGE_KEY_BAR_SET, s_settings.bar_set);
+  s_settings.work_enabled =
+      read_bool(iter, MESSAGE_KEY_WORK_ENABLED, s_settings.work_enabled);
+  s_settings.slot_tl = read_int(iter, MESSAGE_KEY_SLOT_TL, s_settings.slot_tl);
+  s_settings.slot_tr = read_int(iter, MESSAGE_KEY_SLOT_TR, s_settings.slot_tr);
+  s_settings.slot_bl = read_int(iter, MESSAGE_KEY_SLOT_BL, s_settings.slot_bl);
+  s_settings.slot_br = read_int(iter, MESSAGE_KEY_SLOT_BR, s_settings.slot_br);
   s_settings.birth_year =
       read_int(iter, MESSAGE_KEY_BIRTH_YEAR, s_settings.birth_year);
   s_settings.birth_month =
@@ -122,6 +160,12 @@ bool tens_settings_apply(DictionaryIterator *iter) {
       read_int(iter, MESSAGE_KEY_BIRTH_DAY, s_settings.birth_day);
   s_settings.life_span_years =
       read_int(iter, MESSAGE_KEY_LIFE_SPAN_YEARS, s_settings.life_span_years);
+  s_settings.work_start =
+      read_time(iter, MESSAGE_KEY_WORK_START, s_settings.work_start);
+  s_settings.work_end =
+      read_time(iter, MESSAGE_KEY_WORK_END, s_settings.work_end);
+  s_settings.work_color =
+      read_int(iter, MESSAGE_KEY_WORK_COLOR, s_settings.work_color);
   sanitize();
 
   persist_write_data(SETTINGS_PERSIST_KEY, &s_settings, sizeof(s_settings));

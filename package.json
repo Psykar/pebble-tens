@@ -19,14 +19,21 @@
             "DARK_MODE",
             "BARS_MISSING_STYLE",
             "GRID_MISSING_STYLE",
-            "BAR_SET",
+            "SLOT_TL",
+            "SLOT_TR",
+            "SLOT_BL",
+            "SLOT_BR",
             "LAYOUT_4X6",
             "HOURS_HORIZONTAL",
             "BIRTH_YEAR",
             "BIRTH_MONTH",
             "BIRTH_DAY",
             "LIFE_SPAN_YEARS",
-            "FILL_INVERT"
+            "FILL_INVERT",
+            "WORK_ENABLED",
+            "WORK_START",
+            "WORK_END",
+            "WORK_COLOR"
         ],
         "projectType": "native",
         "resources": {

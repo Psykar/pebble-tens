@@ -10,16 +10,10 @@ static int clampi(int v, int lo, int hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Fill a rect with solid ink.
-// TEMP: the grid-wide spectral ramp (rainbow) path has been removed while we
-// isolate the boot-loop crash; this always fills solid. The `grid`/`rainbow`
-// params are kept so callers and the signature stay stable for an easy revert.
-static void draw_ink_rect(GContext *ctx, GRect r, GRect grid, bool rainbow,
-                          GColor ink) {
-  (void)grid;
-  (void)rainbow;
+// Fill a rect with a solid color.
+static void draw_ink_rect(GContext *ctx, GRect r, GColor color) {
   if (r.size.w <= 0 || r.size.h <= 0) return;
-  graphics_context_set_fill_color(ctx, ink);
+  graphics_context_set_fill_color(ctx, color);
   graphics_fill_rect(ctx, r, 0, GCornerNone);
 }
 
@@ -67,19 +61,35 @@ static void draw_bar_label(GContext *ctx, GRect bar, const char *text,
                      GTextAlignmentCenter, NULL);
 }
 
-// TEMP: the rainbow life-bar gradient (fill_gradient_bar) has been removed
-// while we isolate the boot-loop crash. The life bar now always renders solid
-// via fill_solid_bar(). Restore the per-pixel spectral gradient here once
-// rainbow is reimplemented as a fast precomputed bitmap.
+// The bars always render solid (each slot is a single metric color). The old
+// per-pixel spectral life-bar gradient was dropped; only the grid honors the
+// rainbow setting now.
 
 static void render_grid(GContext *ctx, const TensLayout *L,
                         const TensDerived *d, const TensSettings *cfg,
                         GColor ink, GColor muted) {
-  GRect grid = tens_day_rect(L);
+  // Work-day highlight: recolor the inked boxes whose 10-minute slot falls in
+  // [work_start, work_end) (minutes after midnight). Disabled when the range is
+  // empty/inverted. It takes precedence over rainbow so the work block reads as
+  // one distinct color.
+  bool work = cfg->work_enabled && cfg->work_end > cfg->work_start;
+  GColor work_ink = work ? GColorFromHEX(cfg->work_color) : ink;
   for (int i = 0; i < 144; i++) {
     GRect cell = tens_ten_minute_cell(L, i);
+    int cell_min = i * 10;  // minute-of-day at the start of this box
+    // In rainbow mode each box takes its color from its position along the
+    // spectral ramp (a per-box fill, not a per-pixel gradient); otherwise the
+    // inked boxes are solid ink. 144 plain fills, so it stays cheap.
+    GColor cell_color;
+    if (work && cell_min >= cfg->work_start && cell_min < cfg->work_end) {
+      cell_color = work_ink;
+    } else if (cfg->rainbow) {
+      cell_color = tens_spectral((int32_t)i * 1000 / 143);
+    } else {
+      cell_color = ink;
+    }
     if (i < d->ten_minute_index) {
-      draw_ink_rect(ctx, cell, grid, cfg->rainbow, ink);
+      draw_ink_rect(ctx, cell, cell_color);
     } else if (i == d->ten_minute_index) {
       // Current box: muted missing part, then the completed-minute lines.
       draw_missing(ctx, cell, cfg->grid_missing_fill, muted);
@@ -97,7 +107,7 @@ static void render_grid(GContext *ctx, const TensLayout *L,
         int y = cfg->fill_invert ? (rect_bottom(cell) - rows) : cell.origin.y;
         fill = GRect(cell.origin.x, y, cell.size.w, rows);
       }
-      draw_ink_rect(ctx, fill, grid, cfg->rainbow, ink);
+      draw_ink_rect(ctx, fill, cell_color);
     } else {
       // Future box: a centered muted dot placeholder, sized to the box.
       int d4 = cell.size.w >= 9 ? 4 : 3;
@@ -109,17 +119,71 @@ static void render_grid(GContext *ctx, const TensLayout *L,
   }
 }
 
+// Resolve a bar slot's metric to its fill fraction (permille), color and label.
+// The label may be a static string (weekday/month) or formatted into `buf`
+// (year/age/battery). Returns false for OFF so the caller leaves the slot
+// blank. Battery has three visual states: bright green while charging (label
+// prefixed with '+'), red when low, else a distinct teal.
+static bool metric_view(int metric, const TensDerived *d, const struct tm *now,
+                        const TensSettings *cfg, BatteryChargeState batt,
+                        int *frac, GColor *color, const char **label, char *buf,
+                        size_t buflen) {
+  static const char *const WDAY[7] = {"SUN", "MON", "TUE", "WED",
+                                      "THU", "FRI", "SAT"};
+  static const char *const MON[12] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                                      "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+  switch (metric) {
+    case TENS_METRIC_WEEK:
+      *frac = d->frac_week;  *color = TENS_COLOR_WEEK;
+      *label = WDAY[now->tm_wday % 7];
+      return true;
+    case TENS_METRIC_MONTH:
+      *frac = d->frac_month; *color = TENS_COLOR_MONTH;
+      *label = MON[now->tm_mon % 12];
+      return true;
+    case TENS_METRIC_YEAR:
+      *frac = d->frac_year;  *color = TENS_COLOR_YEAR;
+      snprintf(buf, buflen, "%d", now->tm_year + 1900);
+      *label = buf;
+      return true;
+    case TENS_METRIC_LIFE: {
+      int now_year = now->tm_year + 1900;
+      int now_month = now->tm_mon + 1;
+      // Whole years lived: drop one if this year's birthday hasn't arrived yet.
+      int age = now_year - cfg->birth_year;
+      if (now_month < cfg->birth_month ||
+          (now_month == cfg->birth_month && now->tm_mday < cfg->birth_day)) {
+        age--;
+      }
+      if (age < 0) age = 0;
+      *frac = d->frac_life;  *color = TENS_COLOR_LIFE;
+      snprintf(buf, buflen, "%d", age);
+      *label = buf;
+      return true;
+    }
+    case TENS_METRIC_BATTERY: {
+      int pct = clampi(batt.charge_percent, 0, 100);
+      *frac = pct * 10;
+      if (batt.is_charging) {
+        *color = TENS_COLOR_BATTERY_CHARGING;
+        snprintf(buf, buflen, "+%d", pct);
+      } else if (pct <= TENS_BATTERY_LOW_PCT) {
+        *color = TENS_COLOR_BATTERY_LOW;
+        snprintf(buf, buflen, "%d", pct);
+      } else {
+        *color = TENS_COLOR_BATTERY;
+        snprintf(buf, buflen, "%d", pct);
+      }
+      *label = buf;
+      return true;
+    }
+    default:  // TENS_METRIC_OFF
+      return false;
+  }
+}
+
 void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
-                 const TensSettings *cfg_in) {
-  // TEMP: rainbow disabled on-device while we isolate the boot-loop crash.
-  // The per-pixel spectral render (the prime suspect) has been stripped from
-  // draw_ink_rect and the life bar; this override also forces the flag off so
-  // the month/year bars keep their fixed colors regardless of the saved
-  // setting. Remove this override (and use cfg_in directly) once rainbow is
-  // reimplemented as a fast precomputed bitmap.
-  TensSettings cfg_local = *cfg_in;
-  cfg_local.rainbow = false;
-  const TensSettings *cfg = &cfg_local;
+                 const TensSettings *cfg) {
 
   bool dm = cfg->dark_mode;
   GColor bg = dm ? GColorBlack : GColorWhite;
@@ -140,60 +204,23 @@ void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
 
   render_grid(ctx, &L, &d, cfg, ink, muted);
 
-  // Three bars in two fixed slots: the top row split into left | right, plus
-  // the long bottom bar. The chosen set decides which metric (and color) lands
-  // in each slot. Each bar carries a tiny overlaid label: weekday / month /
-  // year for the calendar metrics, and the current age (years lived) for life.
-  static const char *const WDAY[7] = {"SUN", "MON", "TUE", "WED",
-                                      "THU", "FRI", "SAT"};
-  static const char *const MON[12] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-                                      "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
-  int now_year = now->tm_year + 1900;
-  int now_month = now->tm_mon + 1;
-  // Whole years lived: drop one if this year's birthday hasn't arrived yet.
-  int age = now_year - cfg->birth_year;
-  if (now_month < cfg->birth_month ||
-      (now_month == cfg->birth_month && now->tm_mday < cfg->birth_day)) {
-    age--;
+  // Four configurable bar slots: top-left, top-right, bottom-left, bottom-right.
+  // Each slot shows one user-chosen metric (or OFF, drawn blank). Every slot is
+  // half-width, so both bar rows split into two. Each carries a tiny overlaid
+  // label (weekday / month / year / age / battery percent).
+  BatteryChargeState batt = battery_state_service_peek();
+  const int slots[4] = {cfg->slot_tl, cfg->slot_tr, cfg->slot_bl, cfg->slot_br};
+  for (int s = 0; s < 4; s++) {
+    int frac;
+    GColor color;
+    const char *label = NULL;
+    char buf[12];
+    if (!metric_view(slots[s], &d, now, cfg, batt, &frac, &color, &label, buf,
+                     sizeof(buf))) {
+      continue;  // OFF: leave the slot blank
+    }
+    GRect bar = tens_bar_quad(&L, s);
+    fill_solid_bar(ctx, bar, frac, color, cfg->bars_missing_fill, muted);
+    draw_bar_label(ctx, bar, label, ink);
   }
-  if (age < 0) age = 0;
-  char year_buf[8];
-  snprintf(year_buf, sizeof(year_buf), "%d", now_year);
-  char age_buf[8];
-  snprintf(age_buf, sizeof(age_buf), "%d", age);
-  const char *week_label = WDAY[now->tm_wday % 7];
-  const char *month_label = MON[now->tm_mon % 12];
-  const char *year_label = year_buf;
-  const char *age_label = age_buf;
-
-  int top_left_frac, top_right_frac, bottom_frac;
-  GColor top_left_color, top_right_color, bottom_color;
-  const char *top_left_label, *top_right_label, *bottom_label;
-  if (cfg->bar_set == TENS_BARS_WEEK_MONTH_YEAR) {
-    top_left_frac = d.frac_week;   top_left_color = TENS_COLOR_WEEK;
-    top_left_label = week_label;
-    top_right_frac = d.frac_month; top_right_color = TENS_COLOR_MONTH;
-    top_right_label = month_label;
-    bottom_frac = d.frac_year;     bottom_color = TENS_COLOR_YEAR;
-    bottom_label = year_label;
-  } else {
-    top_left_frac = d.frac_month;  top_left_color = TENS_COLOR_MONTH;
-    top_left_label = month_label;
-    top_right_frac = d.frac_year;  top_right_color = TENS_COLOR_YEAR;
-    top_right_label = year_label;
-    bottom_frac = d.frac_life;     bottom_color = TENS_COLOR_LIFE;
-    bottom_label = age_label;
-  }
-  GRect top_left_bar = tens_month_bar(&L);
-  GRect top_right_bar = tens_year_bar(&L);
-  GRect bottom_bar = tens_life_bar(&L);
-  fill_solid_bar(ctx, top_left_bar, top_left_frac, top_left_color,
-                 cfg->bars_missing_fill, muted);
-  fill_solid_bar(ctx, top_right_bar, top_right_frac, top_right_color,
-                 cfg->bars_missing_fill, muted);
-  fill_solid_bar(ctx, bottom_bar, bottom_frac, bottom_color,
-                 cfg->bars_missing_fill, muted);
-  draw_bar_label(ctx, top_left_bar, top_left_label, ink);
-  draw_bar_label(ctx, top_right_bar, top_right_label, ink);
-  draw_bar_label(ctx, bottom_bar, bottom_label, ink);
 }

@@ -135,6 +135,7 @@ class Scene:
     background: str  # palette key
     palette_name: str
     dark_mode: bool = False  # white-on-black when True
+    work_color: int = 0xFFAA00  # RGB hex for the work-day highlight
     ops: list[Op] = field(default_factory=list)
     meta: dict = field(default_factory=dict)
 
@@ -143,7 +144,7 @@ class Scene:
         return self
 
     def palette(self) -> Palette:
-        return resolve(self.palette_name, self.dark_mode)
+        return resolve(self.palette_name, self.dark_mode, self.work_color)
 
 
 # --- Builder -----------------------------------------------------------------
@@ -168,6 +169,7 @@ def build_scene(
         background="background",
         palette_name=cfg.palette_name,
         dark_mode=cfg.dark_mode,
+        work_color=cfg.work_color,
         meta={
             "version": 1,
             "time": f"{rt.hour:02d}:{rt.minute:02d}",
@@ -187,10 +189,17 @@ def build_scene(
     layout_key = cfg.layout
     grid = layout.day_rect(layout_key)
     fill_axis = layout.fill_axis(layout_key)
+    # Work-day highlight: recolor inked boxes whose 10-minute slot is in
+    # [start, end) minutes. Takes precedence over rainbow so the work block
+    # reads as one solid color.
+    work = cfg.work_enabled and cfg.work_end > cfg.work_start
     for i in range(144):
         cell = layout.ten_minute_cell(i, layout_key, cfg.hours_direction)
+        in_work = work and cfg.work_start <= i * 10 < cfg.work_end
+        ink_color = "work" if in_work else "ink"
         if i < derived.ten_minute_index:
-            _ink_rect(scene, cell.x, cell.y, cell.w, cell.h, grid, cfg.rainbow)
+            _ink_rect(scene, cell.x, cell.y, cell.w, cell.h, grid, cfg.rainbow,
+                      ink_color)
         elif i == derived.ten_minute_index:
             # Show the whole current box (its missing part as outline or fill),
             # then the completed-minute lines on top.
@@ -200,7 +209,7 @@ def build_scene(
                 scene.add(StrokeRect(cell.x, cell.y, cell.w, cell.h, "muted"))
             _fill_lines(
                 scene, cell, derived.minute_of_box,
-                fill_axis, cfg.fill_invert, grid, cfg.rainbow,
+                fill_axis, cfg.fill_invert, grid, cfg.rainbow, ink_color,
             )
         else:
             _placeholder(scene, cell, placeholder)
@@ -250,15 +259,17 @@ def _placeholder(scene: Scene, cell: layout.Rect, style: str) -> None:
 
 def _ink_rect(
     scene: Scene, x: int, y: int, w: int, h: int,
-    grid: layout.Rect, rainbow: bool,
+    grid: layout.Rect, rainbow: bool, color: str = "ink",
 ) -> None:
-    """Draw a filled grid region: solid ink, or a slice of the grid-wide
-    spectral gradient when ``rainbow`` is set (the region masks the gradient).
+    """Draw a filled grid region: solid ``color``, or a slice of the grid-wide
+    spectral gradient when ``rainbow`` is set and the region is plain ink (the
+    region masks the gradient). A non-ink ``color`` (e.g. the work-day
+    highlight) always fills solid and overrides rainbow.
     """
-    if rainbow:
+    if rainbow and color == "ink":
         scene.add(Gradient(x, y, w, h, "spectral", "h", span=grid.w, offset=x - grid.x))
     else:
-        scene.add(FillRect(x, y, w, h, "ink"))
+        scene.add(FillRect(x, y, w, h, color))
 
 
 def _fill_lines(
@@ -269,6 +280,7 @@ def _fill_lines(
     invert: bool,
     grid: layout.Rect,
     rainbow: bool,
+    color: str = "ink",
 ) -> None:
     """Fill ``count`` 1px lines of a box (1 line == 1 completed minute).
 
@@ -282,13 +294,13 @@ def _fill_lines(
         if cols == 0:
             return
         x = cell.right - cols if invert else cell.x
-        _ink_rect(scene, x, cell.y, cols, cell.h, grid, rainbow)
+        _ink_rect(scene, x, cell.y, cols, cell.h, grid, rainbow, color)
     else:  # vertical
         rows = min(cell.h, max(0, count))
         if rows == 0:
             return
         y = cell.bottom - rows if invert else cell.y
-        _ink_rect(scene, cell.x, y, cell.w, rows, grid, rainbow)
+        _ink_rect(scene, cell.x, y, cell.w, rows, grid, rainbow, color)
 
 
 def _missing_track(scene: Scene, rect: layout.Rect, missing_style: str) -> None:

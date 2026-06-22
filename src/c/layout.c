@@ -71,21 +71,19 @@ GRect tens_ten_minute_cell(const TensLayout *L, int index) {
   return GRect(x, y, TENS_BOX, TENS_BOX);
 }
 
-static GRect bar_slot(const TensLayout *L, int slot) {
-  int top = L->oy + L->grid_h + GRID_BAR_GAP + slot * (BAR_H + BAR_GAP);
+static GRect bar_slot(const TensLayout *L, int row) {
+  int top = L->oy + L->grid_h + GRID_BAR_GAP + row * (BAR_H + BAR_GAP);
   return GRect(L->ox, top, L->grid_w, BAR_H);
 }
 
-// Top bar (slot 0) split into two halves with SUB_GAP between them.
-static GRect half(const TensLayout *L, int i) {
-  GRect bar = bar_slot(L, 0);
+// Bar slot rect: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right. Each
+// row is split into two halves with SUB_GAP between them; the right half
+// absorbs any odd-pixel remainder.
+GRect tens_bar_quad(const TensLayout *L, int slot) {
+  GRect bar = bar_slot(L, slot / 2);
   int left_w = (bar.size.w - SUB_GAP) / 2;
-  if (i == 0) return GRect(bar.origin.x, bar.origin.y, left_w, BAR_H);
+  if (slot % 2 == 0) return GRect(bar.origin.x, bar.origin.y, left_w, BAR_H);
   int right_x = bar.origin.x + left_w + SUB_GAP;
   int right = bar.origin.x + bar.size.w;
-  return GRect(right_x, bar.origin.y, right - right_x, BAR_H);  // absorbs remainder
+  return GRect(right_x, bar.origin.y, right - right_x, BAR_H);
 }
-
-GRect tens_month_bar(const TensLayout *L) { return half(L, 0); }
-GRect tens_year_bar(const TensLayout *L)  { return half(L, 1); }
-GRect tens_life_bar(const TensLayout *L)  { return bar_slot(L, 1); }

@@ -85,7 +85,8 @@ def gradient_stops(name: str) -> list[tuple[int, int, int]]:
         raise KeyError(f"unknown gradient {name!r}") from exc
 
 
-def resolve(name: str = "default", dark_mode: bool = False) -> Palette:
+def resolve(name: str = "default", dark_mode: bool = False,
+            work_color: int = 0xFFAA00) -> Palette:
     """Build the palette for the chosen background.
 
     dark_mode=False -> white background, black ink (boxes).
@@ -94,8 +95,11 @@ def resolve(name: str = "default", dark_mode: bool = False) -> Palette:
     "muted" is one contrasty gray used for placeholders, unfilled tracks /
     outlines, and the month/year bars in rainbow mode: dark gray on a white
     background, light gray on a black one (so it stays visible in both).
-    "month"/"year" are the fixed non-rainbow bar colors.
+    "month"/"year" are the fixed non-rainbow bar colors. "work" is the
+    user-configurable work-day highlight color (RGB hex ``work_color``).
     """
+    wr, wg, wb = (work_color >> 16) & 0xFF, (work_color >> 8) & 0xFF, work_color & 0xFF
+    work = PaletteColor((wr, wg, wb), f"GColorFromHEX(0x{work_color:06X})")
     return Palette(
         name,
         {
@@ -105,5 +109,6 @@ def resolve(name: str = "default", dark_mode: bool = False) -> Palette:
             "gray": _LIGHT_GRAY if dark_mode else _DARK_GRAY,
             "month": _MONTH,
             "year": _YEAR,
+            "work": work,
         },
     )

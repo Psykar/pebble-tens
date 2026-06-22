@@ -11,6 +11,13 @@
 #define TENS_COLOR_YEAR  GColorVividCerulean
 #define TENS_COLOR_LIFE  GColorVividViolet
 
+// Battery has three states so its meaning reads at a glance: a distinct teal
+// when healthy, bright green while charging, and red when low.
+#define TENS_COLOR_BATTERY          GColorMediumAquamarine
+#define TENS_COLOR_BATTERY_CHARGING GColorGreen
+#define TENS_COLOR_BATTERY_LOW      GColorRed
+#define TENS_BATTERY_LOW_PCT        20
+
 // --- Spectral ramp (life bar + rainbow grid mask) ----------------------------
 #define TENS_SPECTRAL_STOPS 6
 static const uint8_t TENS_SPECTRAL[TENS_SPECTRAL_STOPS][3] = {

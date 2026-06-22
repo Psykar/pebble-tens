@@ -74,6 +74,13 @@ class UserConfig:
     # Rainbow: color the inked boxes/minute-lines by a spectral gradient that
     # spans the whole day grid (the ink acts as a mask over the gradient).
     rainbow: bool = False
+    # Work-day highlight: recolor the grid boxes whose 10-minute slot falls in
+    # [work_start, work_end) minutes after midnight (no overnight wrap). Off by
+    # default; 9-to-5 when on.
+    work_enabled: bool = False
+    work_start: int = 9 * 60  # work-day start, minutes after midnight (0-1439)
+    work_end: int = 17 * 60  # work-day end (exclusive), minutes after midnight
+    work_color: int = 0xFFAA00  # RGB hex for highlighted boxes
 
     def __post_init__(self) -> None:
         _check("birth_month", self.birth_month, 1, 12)
@@ -86,6 +93,9 @@ class UserConfig:
             raise ValueError("hours_direction must be 'vertical' or 'horizontal'")
         if self.missing_style not in ("outline", "fill"):
             raise ValueError("missing_style must be 'outline' or 'fill'")
+        _check("work_start", self.work_start, 0, 1439)
+        _check("work_end", self.work_end, 0, 1440)
+        _check("work_color", self.work_color, 0, 0xFFFFFF)
 
 
 def _check(name: str, value: int, lo: int, hi: int) -> None:

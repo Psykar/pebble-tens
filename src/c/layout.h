@@ -40,6 +40,6 @@ void tens_layout_init(TensLayout *layout, int canvas_w, int canvas_h,
 GRect tens_day_rect(const TensLayout *layout);
 GRect tens_hour_block(const TensLayout *layout, int hour);
 GRect tens_ten_minute_cell(const TensLayout *layout, int index);
-GRect tens_month_bar(const TensLayout *layout);  // left half of the top bar
-GRect tens_year_bar(const TensLayout *layout);   // right half of the top bar
-GRect tens_life_bar(const TensLayout *layout);   // the long bottom bar
+// Bar slot rect by index: 0=top-left, 1=top-right, 2=bottom-left,
+// 3=bottom-right. Both bar rows are split into two half-width slots.
+GRect tens_bar_quad(const TensLayout *layout, int slot);

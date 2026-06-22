@@ -57,3 +57,21 @@ def test_export_c_emits_render_function():
     assert "tens_render_scene" in src
     assert "#include <pebble.h>" in src
     assert "graphics_fill_rect" in src
+
+
+def test_work_highlight_off_by_default():
+    colors = {getattr(op, "color", None) for op in _scene().ops}
+    assert "work" not in colors
+
+
+def test_work_highlight_recolors_work_hour_cells():
+    rt = RuntimeState(2026, 6, 18, 3, 14, 30)  # 14:30 -> ten-minute index 87
+    cfg = UserConfig(
+        birth_year=1990, birth_month=4, birth_day=12, work_enabled=True
+    )  # default 9-17 covers cells 54..101
+    scene = build_scene(rt, cfg, derive(rt, cfg))
+    colors = {getattr(op, "color", None) for op in scene.ops}
+    assert "work" in colors
+    # The configured work color resolves to a real palette entry.
+    assert "work" in scene.palette()
+

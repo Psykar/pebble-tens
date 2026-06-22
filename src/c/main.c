@@ -16,6 +16,12 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   layer_mark_dirty(s_layer);
 }
 
+// Redraw when the battery level or charging state changes so a battery slot
+// stays current between the minute ticks.
+static void battery_handler(BatteryChargeState state) {
+  layer_mark_dirty(s_layer);
+}
+
 static void inbox_received(DictionaryIterator *iter, void *context) {
   if (tens_settings_apply(iter)) {
     layer_mark_dirty(s_layer);
@@ -48,6 +54,7 @@ static void init(void) {
   window_stack_push(s_window, true);
 
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+  battery_state_service_subscribe(battery_handler);
   app_message_register_inbox_received(inbox_received);
   app_message_register_inbox_dropped(inbox_dropped);
   // Use a generous inbox so the full settings dict can never be dropped for
@@ -57,6 +64,7 @@ static void init(void) {
 
 static void deinit(void) {
   tick_timer_service_unsubscribe();
+  battery_state_service_unsubscribe();
   window_destroy(s_window);
 }
 
