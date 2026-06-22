@@ -43,17 +43,20 @@ static void fill_solid_bar(GContext *ctx, GRect bar, int progress, GColor color,
 }
 
 // Draw a label within a given rect. GOTHIC_14_BOLD is the smallest bold system
-// font. The label is vertically centered in the rect; Gothic carries extra top
-// padding, so a small upward nudge (LABEL_VOFFSET) keeps the glyph block
-// visually centered. NULL text draws nothing.
+// font. The reserved column (LABEL_W) is sized to hold the widest label
+// ("100" / a 4-digit year) so text never overflows; we use WordWrap (no
+// ellipsis) since each label is a single short token that always fits. The
+// label is vertically centered in the rect; Gothic carries extra top padding,
+// so a small upward nudge (LABEL_VOFFSET) keeps the glyph block visually
+// centered. NULL text draws nothing.
 #define LABEL_VOFFSET (-3)
 #define LABEL_GAP 3   // pixels between bar edge and label text
-// Reserved label column width. Wide enough for "100" / 4-digit year in
+// Reserved label column width. Wide enough for a 4-digit year in
 // GOTHIC_14_BOLD without clipping, while leaving the bar a usable length.
 #if PBL_DISPLAY_WIDTH >= 200
-#define LABEL_W 24
+#define LABEL_W 30
 #else
-#define LABEL_W 22
+#define LABEL_W 26
 #endif
 
 static void draw_bar_label(GContext *ctx, GRect box, const char *text,
@@ -65,25 +68,36 @@ static void draw_bar_label(GContext *ctx, GRect box, const char *text,
   GRect line = GRect(box.origin.x,
                      box.origin.y + (box.size.h - box_h) / 2 + LABEL_VOFFSET,
                      box.size.w, box_h);
-  graphics_draw_text(ctx, text, font, line, GTextOverflowModeTrailingEllipsis,
+  graphics_draw_text(ctx, text, font, line, GTextOverflowModeWordWrap,
                      align, NULL);
 }
 
 // Carve a label column off one side of a slot, leaving the bar in the rest.
 // left=true reserves the label on the left (for left bars); left=false reserves
-// it on the right (for right bars). The bar shrinks to make room so neither the
-// bar nor the label spills outside the slot. Outputs the bar and label rects.
-static void split_slot(GRect slot, bool left, GRect *bar, GRect *label) {
-  int bar_w = slot.size.w - LABEL_W - LABEL_GAP;
-  if (bar_w < 1) bar_w = 1;
+// it on the right (for right bars). Because the grid is centered there's empty
+// canvas margin outside the slot; the label is pushed out into that margin so
+// the bar only gives up the space the label actually intrudes past the margin.
+// When the margin alone is wide enough for LABEL_W the bar keeps its full slot
+// width. canvas_w is the live display width. Outputs the bar and label rects.
+#define EDGE_PAD 1
+static void split_slot(GRect slot, bool left, int canvas_w, GRect *bar,
+                       GRect *label) {
+  int y = slot.origin.y, h = slot.size.h;
   if (left) {
-    *label = GRect(slot.origin.x, slot.origin.y, LABEL_W, slot.size.h);
-    *bar = GRect(slot.origin.x + LABEL_W + LABEL_GAP, slot.origin.y, bar_w,
-                 slot.size.h);
+    // Minimum bar start that still leaves the label its full width in the
+    // margin; never push the bar left of its own slot edge.
+    int bar_x = EDGE_PAD + LABEL_W + LABEL_GAP;
+    if (bar_x < slot.origin.x) bar_x = slot.origin.x;
+    *bar = GRect(bar_x, y, rect_right(slot) - bar_x, h);
+    int label_right = bar_x - LABEL_GAP;
+    *label = GRect(EDGE_PAD, y, label_right - EDGE_PAD, h);
   } else {
-    *bar = GRect(slot.origin.x, slot.origin.y, bar_w, slot.size.h);
-    *label = GRect(rect_right(slot) - LABEL_W, slot.origin.y, LABEL_W,
-                   slot.size.h);
+    int edge = canvas_w - EDGE_PAD;
+    int bar_end = edge - LABEL_W - LABEL_GAP;
+    if (bar_end > rect_right(slot)) bar_end = rect_right(slot);
+    *bar = GRect(slot.origin.x, y, bar_end - slot.origin.x, h);
+    int label_x = bar_end + LABEL_GAP;
+    *label = GRect(label_x, y, edge - label_x, h);
   }
 }
 
@@ -192,7 +206,7 @@ static bool metric_view(int metric, const TensDerived *d, const struct tm *now,
       }
       if (age < 0) age = 0;
       *frac = d->frac_life;  *color = TENS_COLOR_LIFE;
-      snprintf(buf, buflen, "%d", age);
+      snprintf(buf, buflen, "%dy", age);
       *label = buf;
       return true;
     }
@@ -201,13 +215,13 @@ static bool metric_view(int metric, const TensDerived *d, const struct tm *now,
       *frac = pct * 10;
       if (batt.is_charging) {
         *color = TENS_COLOR_BATTERY_CHARGING;
-        snprintf(buf, buflen, "+%d", pct);
+        snprintf(buf, buflen, "+%d%%", pct);
       } else if (pct <= TENS_BATTERY_LOW_PCT) {
         *color = TENS_COLOR_BATTERY_LOW;
-        snprintf(buf, buflen, "%d", pct);
+        snprintf(buf, buflen, "%d%%", pct);
       } else {
         *color = TENS_COLOR_BATTERY;
-        snprintf(buf, buflen, "%d", pct);
+        snprintf(buf, buflen, "%d%%", pct);
       }
       *label = buf;
       return true;
@@ -265,10 +279,10 @@ void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
     // matching side so the bar shrinks rather than overlapping the text.
     bool left = (s % 2 == 0);
     GRect bar, label_box;
-    split_slot(slot, left, &bar, &label_box);
+    split_slot(slot, left, bounds.size.w, &bar, &label_box);
     fill_solid_bar(ctx, bar, frac, color, cfg->bars_missing_fill, muted);
-    // Align the label toward the bar it belongs to so each pair reads together.
-    draw_bar_label(ctx, label_box, label, ink,
-                   left ? GTextAlignmentRight : GTextAlignmentLeft);
+    // Center the label in its column so stacked labels (e.g. weekday over year)
+    // share a vertical center line regardless of their differing widths.
+    draw_bar_label(ctx, label_box, label, ink, GTextAlignmentCenter);
   }
 }
