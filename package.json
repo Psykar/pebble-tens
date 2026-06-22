@@ -34,6 +34,7 @@
         },
         "sdkVersion": "3",
         "targetPlatforms": [
+            "basalt",
             "emery"
         ],
         "uuid": "0f61229e-ee11-4e93-bc6c-eedaa39c93fb",

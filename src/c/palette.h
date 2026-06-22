@@ -9,6 +9,7 @@
 #define TENS_COLOR_WEEK  GColorKellyGreen
 #define TENS_COLOR_MONTH GColorChromeYellow
 #define TENS_COLOR_YEAR  GColorVividCerulean
+#define TENS_COLOR_LIFE  GColorVividViolet
 
 // --- Spectral ramp (life bar + rainbow grid mask) ----------------------------
 #define TENS_SPECTRAL_STOPS 6

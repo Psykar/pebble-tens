@@ -83,8 +83,12 @@ portal.
 
 ## Known gaps / next steps
 
-- **emery only.** Geometry is hardcoded to 200×228. Supporting basalt/diorite/
-  chalk needs a responsive layout (scale `BOX`/gaps, or letterbox).
+- **emery + basalt.** Geometry is responsive: emery (200×228) uses the original
+  10px boxes; the 144×168 displays (basalt / Pebble Time + Pebble Time Steel)
+  use a proportionally smaller 7px field, centered from the live canvas bounds.
+  Round (chalk) and the B&W aplite/diorite platforms aren't enabled yet — chalk
+  needs the rectangular grid inset to clear the circle, and the color-centric
+  bars would collapse to black/white on the 1-bit displays.
 - **Rainbow/life dithering.** On device the spectral ramp is drawn per-column
   with nearest-color quantization (no Floyd–Steinberg), so it bands more than
   the Python preview. To match the preview, precompute dithered bitmaps from

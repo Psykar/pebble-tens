@@ -1,13 +1,20 @@
 #include "layout.h"
 
-// Bars below the grid.
+// Bars below the grid. Sized per display so they fit the shorter legacy canvas.
+#if PBL_DISPLAY_WIDTH >= 200
 #define BAR_H 10
 #define GRID_BAR_GAP 10
 #define BAR_GAP 6
+#else
+#define BAR_H 7
+#define GRID_BAR_GAP 7
+#define BAR_GAP 5
+#endif
 #define SUB_GAP TENS_BLOCK_GAP   // gap between week/month/year == hour-block gap
 #define N_BARS 2
 
-void tens_layout_init(TensLayout *L, bool layout_4x6, bool hours_horizontal) {
+void tens_layout_init(TensLayout *L, int canvas_w, int canvas_h,
+                      bool layout_4x6, bool hours_horizontal) {
   if (layout_4x6) {  // "4x6": 4 cols x 6 rows, cells 3x2
     L->blocks_x = 4;
     L->blocks_y = 6;
@@ -24,9 +31,9 @@ void tens_layout_init(TensLayout *L, bool layout_4x6, bool hours_horizontal) {
   L->block_h = L->cell_y * TENS_BOX + (L->cell_y - 1) * TENS_CELL_GAP;
   L->grid_w = L->blocks_x * L->block_w + (L->blocks_x - 1) * TENS_BLOCK_GAP;
   L->grid_h = L->blocks_y * L->block_h + (L->blocks_y - 1) * TENS_BLOCK_GAP;
-  L->ox = (TENS_CANVAS_W - L->grid_w) / 2;
+  L->ox = (canvas_w - L->grid_w) / 2;
   int bars_total = GRID_BAR_GAP + N_BARS * BAR_H + (N_BARS - 1) * BAR_GAP;
-  L->oy = (TENS_CANVAS_H - (L->grid_h + bars_total)) / 2;
+  L->oy = (canvas_h - (L->grid_h + bars_total)) / 2;
 }
 
 GRect tens_day_rect(const TensLayout *L) {

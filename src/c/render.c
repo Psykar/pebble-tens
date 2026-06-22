@@ -48,6 +48,25 @@ static void fill_solid_bar(GContext *ctx, GRect bar, int progress, GColor color,
   }
 }
 
+// Overlay a tiny label centered on a bar. GOTHIC_14_BOLD is the smallest bold
+// system font; we center its line box on the bar so the glyphs sit inside the
+// bar rather than floating above it. Gothic carries extra top padding, so a
+// small upward nudge (LABEL_VOFFSET) keeps the glyph block visually centered.
+// NULL text draws nothing.
+#define LABEL_VOFFSET (-3)
+static void draw_bar_label(GContext *ctx, GRect bar, const char *text,
+                           GColor color) {
+  if (!text) return;
+  GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  graphics_context_set_text_color(ctx, color);
+  const int box_h = 14;
+  GRect box = GRect(bar.origin.x,
+                    bar.origin.y + (bar.size.h - box_h) / 2 + LABEL_VOFFSET,
+                    bar.size.w, box_h);
+  graphics_draw_text(ctx, text, font, box, GTextOverflowModeTrailingEllipsis,
+                     GTextAlignmentCenter, NULL);
+}
+
 // TEMP: the rainbow life-bar gradient (fill_gradient_bar) has been removed
 // while we isolate the boot-loop crash. The life bar now always renders solid
 // via fill_solid_bar(). Restore the per-pixel spectral gradient here once
@@ -64,22 +83,24 @@ static void render_grid(GContext *ctx, const TensLayout *L,
     } else if (i == d->ten_minute_index) {
       // Current box: muted missing part, then the completed-minute lines.
       draw_missing(ctx, cell, cfg->grid_missing_fill, muted);
-      // Minute lines fill along the cell's long axis (same as the boxes).
+      // Minute lines fill along the cell's long axis (same as the boxes). A box
+      // spans 10 minutes, so the fill is proportional to the cell extent rather
+      // than a fixed 1px-per-minute (which only held on emery's 10px boxes).
       int count = d->minute_of_box;
       GRect fill;
       if (L->cell_x == 3) {
-        int cols = clampi(count, 0, cell.size.w);
+        int cols = clampi(count * cell.size.w / 10, 0, cell.size.w);
         int x = cfg->fill_invert ? (rect_right(cell) - cols) : cell.origin.x;
         fill = GRect(x, cell.origin.y, cols, cell.size.h);
       } else {
-        int rows = clampi(count, 0, cell.size.h);
+        int rows = clampi(count * cell.size.h / 10, 0, cell.size.h);
         int y = cfg->fill_invert ? (rect_bottom(cell) - rows) : cell.origin.y;
         fill = GRect(cell.origin.x, y, cell.size.w, rows);
       }
       draw_ink_rect(ctx, fill, grid, cfg->rainbow, ink);
     } else {
-      // Future box: a centered 4x4 muted dot placeholder.
-      int d4 = 4;
+      // Future box: a centered muted dot placeholder, sized to the box.
+      int d4 = cell.size.w >= 9 ? 4 : 3;
       int ox = cell.origin.x + (cell.size.w - d4) / 2;
       int oy = cell.origin.y + (cell.size.h - d4) / 2;
       graphics_context_set_fill_color(ctx, muted);
@@ -114,28 +135,65 @@ void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
   tens_derive(now, cfg, &d);
 
   TensLayout L;
-  tens_layout_init(&L, cfg->layout_4x6, cfg->hours_horizontal);
+  tens_layout_init(&L, bounds.size.w, bounds.size.h, cfg->layout_4x6,
+                   cfg->hours_horizontal);
 
   render_grid(ctx, &L, &d, cfg, ink, muted);
 
   // Three bars in two fixed slots: the top row split into left | right, plus
   // the long bottom bar. The chosen set decides which metric (and color) lands
-  // in each slot. Life uses ink; the calendar metrics use their fixed colors.
+  // in each slot. Each bar carries a tiny overlaid label: weekday / month /
+  // year for the calendar metrics, and the current age (years lived) for life.
+  static const char *const WDAY[7] = {"SUN", "MON", "TUE", "WED",
+                                      "THU", "FRI", "SAT"};
+  static const char *const MON[12] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                                      "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+  int now_year = now->tm_year + 1900;
+  int now_month = now->tm_mon + 1;
+  // Whole years lived: drop one if this year's birthday hasn't arrived yet.
+  int age = now_year - cfg->birth_year;
+  if (now_month < cfg->birth_month ||
+      (now_month == cfg->birth_month && now->tm_mday < cfg->birth_day)) {
+    age--;
+  }
+  if (age < 0) age = 0;
+  char year_buf[8];
+  snprintf(year_buf, sizeof(year_buf), "%d", now_year);
+  char age_buf[8];
+  snprintf(age_buf, sizeof(age_buf), "%d", age);
+  const char *week_label = WDAY[now->tm_wday % 7];
+  const char *month_label = MON[now->tm_mon % 12];
+  const char *year_label = year_buf;
+  const char *age_label = age_buf;
+
   int top_left_frac, top_right_frac, bottom_frac;
   GColor top_left_color, top_right_color, bottom_color;
+  const char *top_left_label, *top_right_label, *bottom_label;
   if (cfg->bar_set == TENS_BARS_WEEK_MONTH_YEAR) {
     top_left_frac = d.frac_week;   top_left_color = TENS_COLOR_WEEK;
+    top_left_label = week_label;
     top_right_frac = d.frac_month; top_right_color = TENS_COLOR_MONTH;
+    top_right_label = month_label;
     bottom_frac = d.frac_year;     bottom_color = TENS_COLOR_YEAR;
+    bottom_label = year_label;
   } else {
     top_left_frac = d.frac_month;  top_left_color = TENS_COLOR_MONTH;
+    top_left_label = month_label;
     top_right_frac = d.frac_year;  top_right_color = TENS_COLOR_YEAR;
-    bottom_frac = d.frac_life;     bottom_color = ink;
+    top_right_label = year_label;
+    bottom_frac = d.frac_life;     bottom_color = TENS_COLOR_LIFE;
+    bottom_label = age_label;
   }
-  fill_solid_bar(ctx, tens_month_bar(&L), top_left_frac, top_left_color,
+  GRect top_left_bar = tens_month_bar(&L);
+  GRect top_right_bar = tens_year_bar(&L);
+  GRect bottom_bar = tens_life_bar(&L);
+  fill_solid_bar(ctx, top_left_bar, top_left_frac, top_left_color,
                  cfg->bars_missing_fill, muted);
-  fill_solid_bar(ctx, tens_year_bar(&L), top_right_frac, top_right_color,
+  fill_solid_bar(ctx, top_right_bar, top_right_frac, top_right_color,
                  cfg->bars_missing_fill, muted);
-  fill_solid_bar(ctx, tens_life_bar(&L), bottom_frac, bottom_color,
+  fill_solid_bar(ctx, bottom_bar, bottom_frac, bottom_color,
                  cfg->bars_missing_fill, muted);
+  draw_bar_label(ctx, top_left_bar, top_left_label, ink);
+  draw_bar_label(ctx, top_right_bar, top_right_label, ink);
+  draw_bar_label(ctx, bottom_bar, bottom_label, ink);
 }
