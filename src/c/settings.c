@@ -1,10 +1,10 @@
 #include "settings.h"
 #include <string.h>
 
-// Bumped to 4 when the work-day highlight fields were added. The size guard
+// Bumped to 5 when the per-mode grid box colors were added. The size guard
 // alone can't always distinguish old blobs, so the new key forces a clean
 // default load after the update.
-#define SETTINGS_PERSIST_KEY 4
+#define SETTINGS_PERSIST_KEY 5
 
 static TensSettings s_settings;
 
@@ -29,6 +29,8 @@ static void set_defaults(void) {
       .work_start = 9 * 60,        // 9-to-5 when enabled
       .work_end = 17 * 60,
       .work_color = TENS_WORK_COLOR_DEFAULT,  // warm amber (GColorChromeYellow)
+      .grid_color_light = TENS_GRID_COLOR_LIGHT_DEFAULT,  // black on white
+      .grid_color_dark = TENS_GRID_COLOR_DARK_DEFAULT,    // white on black
   };
 }
 
@@ -55,6 +57,8 @@ static void sanitize(void) {
   s_settings.work_start = clampi(s_settings.work_start, 0, 1439);
   s_settings.work_end = clampi(s_settings.work_end, 0, 1440);
   s_settings.work_color = clampi(s_settings.work_color, 0, 0xFFFFFF);
+  s_settings.grid_color_light = clampi(s_settings.grid_color_light, 0, 0xFFFFFF);
+  s_settings.grid_color_dark = clampi(s_settings.grid_color_dark, 0, 0xFFFFFF);
 }
 
 void tens_settings_init(void) {
@@ -166,6 +170,10 @@ bool tens_settings_apply(DictionaryIterator *iter) {
       read_time(iter, MESSAGE_KEY_WORK_END, s_settings.work_end);
   s_settings.work_color =
       read_int(iter, MESSAGE_KEY_WORK_COLOR, s_settings.work_color);
+  s_settings.grid_color_light =
+      read_int(iter, MESSAGE_KEY_GRID_COLOR_LIGHT, s_settings.grid_color_light);
+  s_settings.grid_color_dark =
+      read_int(iter, MESSAGE_KEY_GRID_COLOR_DARK, s_settings.grid_color_dark);
   sanitize();
 
   persist_write_data(SETTINGS_PERSIST_KEY, &s_settings, sizeof(s_settings));

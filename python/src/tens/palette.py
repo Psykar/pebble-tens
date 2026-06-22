@@ -85,8 +85,14 @@ def gradient_stops(name: str) -> list[tuple[int, int, int]]:
         raise KeyError(f"unknown gradient {name!r}") from exc
 
 
+def _from_hex(value: int) -> PaletteColor:
+    """A PaletteColor from a 0xRRGGBB int (preview RGB + a C GColorFromHEX)."""
+    r, g, b = (value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF
+    return PaletteColor((r, g, b), f"GColorFromHEX(0x{value:06X})")
+
+
 def resolve(name: str = "default", dark_mode: bool = False,
-            work_color: int = 0xFFAA00) -> Palette:
+            work_color: int = 0xFFAA00, grid_color: int | None = None) -> Palette:
     """Build the palette for the chosen background.
 
     dark_mode=False -> white background, black ink (boxes).
@@ -96,19 +102,22 @@ def resolve(name: str = "default", dark_mode: bool = False,
     outlines, and the month/year bars in rainbow mode: dark gray on a white
     background, light gray on a black one (so it stays visible in both).
     "month"/"year" are the fixed non-rainbow bar colors. "work" is the
-    user-configurable work-day highlight color (RGB hex ``work_color``).
+    user-configurable work-day highlight color (RGB hex ``work_color``). "grid"
+    is the configurable filled-box color (RGB hex ``grid_color``); it defaults
+    to the mode ink when unset.
     """
-    wr, wg, wb = (work_color >> 16) & 0xFF, (work_color >> 8) & 0xFF, work_color & 0xFF
-    work = PaletteColor((wr, wg, wb), f"GColorFromHEX(0x{work_color:06X})")
+    ink = _WHITE if dark_mode else _BLACK
+    grid = ink if grid_color is None else _from_hex(grid_color)
     return Palette(
         name,
         {
             "background": _BLACK if dark_mode else _WHITE,
-            "ink": _WHITE if dark_mode else _BLACK,
+            "ink": ink,
+            "grid": grid,
             "muted": _DARK_GRAY if dark_mode else _LIGHT_GRAY,
             "gray": _LIGHT_GRAY if dark_mode else _DARK_GRAY,
             "month": _MONTH,
             "year": _YEAR,
-            "work": work,
+            "work": _from_hex(work_color),
         },
     )

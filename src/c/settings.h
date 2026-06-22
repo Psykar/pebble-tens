@@ -21,6 +21,11 @@ enum {
 // (GColorChromeYellow), distinct from the bar colors and readable in both modes.
 #define TENS_WORK_COLOR_DEFAULT 0xFFAA00
 
+// Default filled-box ("minute box") colors per mode (RGB hex, GColorFromHEX):
+// black ink on the white light-mode background, white ink on the black one.
+#define TENS_GRID_COLOR_LIGHT_DEFAULT 0x000000
+#define TENS_GRID_COLOR_DARK_DEFAULT  0xFFFFFF
+
 typedef struct {
   bool rainbow;          // spectral gradient mask over the inked grid/life bar
   bool dark_mode;        // true=black background/white ink, false=white/black
@@ -45,6 +50,8 @@ typedef struct {
   int work_start;        // work-day start, minutes after midnight (0..1439)
   int work_end;          // work-day end (exclusive), minutes after midnight
   int work_color;        // RGB hex for work-day boxes (GColorFromHEX)
+  int grid_color_light;  // RGB hex for filled boxes in light mode
+  int grid_color_dark;   // RGB hex for filled boxes in dark mode
 } TensSettings;
 
 // Access the current settings (valid after tens_settings_init).

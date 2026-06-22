@@ -81,6 +81,10 @@ class UserConfig:
     work_start: int = 9 * 60  # work-day start, minutes after midnight (0-1439)
     work_end: int = 17 * 60  # work-day end (exclusive), minutes after midnight
     work_color: int = 0xFFAA00  # RGB hex for highlighted boxes
+    # Filled-box ("minute box") colors, chosen per mode so each has a sensible
+    # default: black ink on the white light background, white ink on the black.
+    grid_color_light: int = 0x000000  # RGB hex for filled boxes in light mode
+    grid_color_dark: int = 0xFFFFFF  # RGB hex for filled boxes in dark mode
 
     def __post_init__(self) -> None:
         _check("birth_month", self.birth_month, 1, 12)
@@ -96,6 +100,8 @@ class UserConfig:
         _check("work_start", self.work_start, 0, 1439)
         _check("work_end", self.work_end, 0, 1440)
         _check("work_color", self.work_color, 0, 0xFFFFFF)
+        _check("grid_color_light", self.grid_color_light, 0, 0xFFFFFF)
+        _check("grid_color_dark", self.grid_color_dark, 0, 0xFFFFFF)
 
 
 def _check(name: str, value: int, lo: int, hi: int) -> None:

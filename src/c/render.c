@@ -77,11 +77,13 @@ static void render_grid(GContext *ctx, const TensLayout *L,
   for (int i = 0; i < 144; i++) {
     GRect cell = tens_ten_minute_cell(L, i);
     int cell_min = i * 10;  // minute-of-day at the start of this box
+    bool in_work =
+        work && cell_min >= cfg->work_start && cell_min < cfg->work_end;
     // In rainbow mode each box takes its color from its position along the
     // spectral ramp (a per-box fill, not a per-pixel gradient); otherwise the
     // inked boxes are solid ink. 144 plain fills, so it stays cheap.
     GColor cell_color;
-    if (work && cell_min >= cfg->work_start && cell_min < cfg->work_end) {
+    if (in_work) {
       cell_color = work_ink;
     } else if (cfg->rainbow) {
       cell_color = tens_spectral((int32_t)i * 1000 / 143);
@@ -109,11 +111,13 @@ static void render_grid(GContext *ctx, const TensLayout *L,
       }
       draw_ink_rect(ctx, fill, cell_color);
     } else {
-      // Future box: a centered muted dot placeholder, sized to the box.
+      // Future box: a centered dot placeholder, sized to the box. Pending
+      // work-hour boxes use the work color so the upcoming work block reads at
+      // a glance; the rest stay muted gray.
       int d4 = cell.size.w >= 9 ? 4 : 3;
       int ox = cell.origin.x + (cell.size.w - d4) / 2;
       int oy = cell.origin.y + (cell.size.h - d4) / 2;
-      graphics_context_set_fill_color(ctx, muted);
+      graphics_context_set_fill_color(ctx, in_work ? work_ink : muted);
       graphics_fill_rect(ctx, GRect(ox, oy, d4, d4), 0, GCornerNone);
     }
   }
@@ -188,6 +192,11 @@ void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
   bool dm = cfg->dark_mode;
   GColor bg = dm ? GColorBlack : GColorWhite;
   GColor ink = dm ? GColorWhite : GColorBlack;
+  // Configurable color for the filled day-grid boxes (the "minute boxes"),
+  // chosen per mode so each has a sensible default (black on white, white on
+  // black). Labels and bars keep the plain mode ink.
+  GColor grid_ink =
+      GColorFromHEX(dm ? cfg->grid_color_dark : cfg->grid_color_light);
   // Subtle gray (low-contrast): placeholders and unfilled tracks/outlines.
   // Light gray in light mode (on white), dark gray in dark mode (on black).
   GColor muted = dm ? GColorDarkGray : GColorLightGray;
@@ -202,7 +211,7 @@ void tens_render(GContext *ctx, GRect bounds, const struct tm *now,
   tens_layout_init(&L, bounds.size.w, bounds.size.h, cfg->layout_4x6,
                    cfg->hours_horizontal);
 
-  render_grid(ctx, &L, &d, cfg, ink, muted);
+  render_grid(ctx, &L, &d, cfg, grid_ink, muted);
 
   // Four configurable bar slots: top-left, top-right, bottom-left, bottom-right.
   // Each slot shows one user-chosen metric (or OFF, drawn blank). Every slot is

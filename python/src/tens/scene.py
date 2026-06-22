@@ -136,6 +136,8 @@ class Scene:
     palette_name: str
     dark_mode: bool = False  # white-on-black when True
     work_color: int = 0xFFAA00  # RGB hex for the work-day highlight
+    grid_color_light: int = 0x000000  # RGB hex for filled boxes in light mode
+    grid_color_dark: int = 0xFFFFFF  # RGB hex for filled boxes in dark mode
     ops: list[Op] = field(default_factory=list)
     meta: dict = field(default_factory=dict)
 
@@ -144,7 +146,8 @@ class Scene:
         return self
 
     def palette(self) -> Palette:
-        return resolve(self.palette_name, self.dark_mode, self.work_color)
+        grid_color = self.grid_color_dark if self.dark_mode else self.grid_color_light
+        return resolve(self.palette_name, self.dark_mode, self.work_color, grid_color)
 
 
 # --- Builder -----------------------------------------------------------------
@@ -170,6 +173,8 @@ def build_scene(
         palette_name=cfg.palette_name,
         dark_mode=cfg.dark_mode,
         work_color=cfg.work_color,
+        grid_color_light=cfg.grid_color_light,
+        grid_color_dark=cfg.grid_color_dark,
         meta={
             "version": 1,
             "time": f"{rt.hour:02d}:{rt.minute:02d}",
@@ -196,7 +201,7 @@ def build_scene(
     for i in range(144):
         cell = layout.ten_minute_cell(i, layout_key, cfg.hours_direction)
         in_work = work and cfg.work_start <= i * 10 < cfg.work_end
-        ink_color = "work" if in_work else "ink"
+        ink_color = "work" if in_work else "grid"
         if i < derived.ten_minute_index:
             _ink_rect(scene, cell.x, cell.y, cell.w, cell.h, grid, cfg.rainbow,
                       ink_color)
@@ -212,7 +217,8 @@ def build_scene(
                 fill_axis, cfg.fill_invert, grid, cfg.rainbow, ink_color,
             )
         else:
-            _placeholder(scene, cell, placeholder)
+            # Pending work-hour boxes hint the work color; the rest stay muted.
+            _placeholder(scene, cell, placeholder, "work" if in_work else "muted")
 
     # Two bars under the grid: a top bar split in half (month | year) and the
     # long life bar. Each fills up to its progress over a "muted" track. In
@@ -239,22 +245,23 @@ def build_scene(
 PLACEHOLDER_DOT = 4
 
 
-def _placeholder(scene: Scene, cell: layout.Rect, style: str) -> None:
-    """Render an empty (not-yet-reached) box in the muted gray.
+def _placeholder(scene: Scene, cell: layout.Rect, style: str,
+                 color: str = "muted") -> None:
+    """Render an empty (not-yet-reached) box in ``color`` (muted by default).
 
     "dot"     -> centered PLACEHOLDER_DOT square
-    "block"   -> full muted fill
-    "outline" -> muted outline
+    "block"   -> full fill
+    "outline" -> outline
     """
     if style == "block":
-        scene.add(FillRect(cell.x, cell.y, cell.w, cell.h, "muted"))
+        scene.add(FillRect(cell.x, cell.y, cell.w, cell.h, color))
     elif style == "outline":
-        scene.add(StrokeRect(cell.x, cell.y, cell.w, cell.h, "muted"))
+        scene.add(StrokeRect(cell.x, cell.y, cell.w, cell.h, color))
     else:  # "dot"
         d = PLACEHOLDER_DOT
         ox = cell.x + (cell.w - d) // 2
         oy = cell.y + (cell.h - d) // 2
-        scene.add(FillRect(ox, oy, d, d, "muted"))
+        scene.add(FillRect(ox, oy, d, d, color))
 
 
 def _ink_rect(
@@ -262,11 +269,11 @@ def _ink_rect(
     grid: layout.Rect, rainbow: bool, color: str = "ink",
 ) -> None:
     """Draw a filled grid region: solid ``color``, or a slice of the grid-wide
-    spectral gradient when ``rainbow`` is set and the region is plain ink (the
-    region masks the gradient). A non-ink ``color`` (e.g. the work-day
-    highlight) always fills solid and overrides rainbow.
+    spectral gradient when ``rainbow`` is set and the region is the plain grid
+    box color (the region masks the gradient). A highlight ``color`` (e.g. the
+    work-day color) always fills solid and overrides rainbow.
     """
-    if rainbow and color == "ink":
+    if rainbow and color == "grid":
         scene.add(Gradient(x, y, w, h, "spectral", "h", span=grid.w, offset=x - grid.x))
     else:
         scene.add(FillRect(x, y, w, h, color))

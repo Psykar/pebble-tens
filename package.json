@@ -33,7 +33,9 @@
             "WORK_ENABLED",
             "WORK_START",
             "WORK_END",
-            "WORK_COLOR"
+            "WORK_COLOR",
+            "GRID_COLOR_LIGHT",
+            "GRID_COLOR_DARK"
         ],
         "projectType": "native",
         "resources": {

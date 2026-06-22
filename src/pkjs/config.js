@@ -41,6 +41,20 @@ module.exports = [
         defaultValue: false,
       },
       {
+        type: 'color',
+        messageKey: 'GRID_COLOR_LIGHT',
+        label: 'Box color (light mode)',
+        defaultValue: '0x000000',
+        sunlight: false,
+      },
+      {
+        type: 'color',
+        messageKey: 'GRID_COLOR_DARK',
+        label: 'Box color (dark mode)',
+        defaultValue: '0xFFFFFF',
+        sunlight: false,
+      },
+      {
         type: 'toggle',
         messageKey: 'LAYOUT_4X6',
         label: 'Layout 4x6 (3x2 cells, vs 6x4)',
